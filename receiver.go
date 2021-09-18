@@ -26,8 +26,8 @@ type Receiver struct {
 }
 
 // ID() is the ID of the link used for this Receiver.
-func (s *Receiver) ID() string {
-	return s.link.key.name
+func (r *Receiver) ID() string {
+	return r.link.key.name
 }
 
 // HandleMessage takes in a func to handle the incoming message.
