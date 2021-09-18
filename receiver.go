@@ -25,6 +25,11 @@ type Receiver struct {
 	manualCreditor *manualCreditor         // allows for credits to be managed manually (via calls to IssueCredit/DrainCredit)
 }
 
+// ID() is the ID of the link used for this Receiver.
+func (s *Receiver) ID() string {
+	return s.link.key.name
+}
+
 // HandleMessage takes in a func to handle the incoming message.
 // Blocks until a message is received, ctx completes, or an error occurs.
 // When using ModeSecond, You must take an action on the message in the provided handler (Accept/Reject/Release/Modify)
