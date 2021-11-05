@@ -419,7 +419,7 @@ type MessageProperties struct {
 	CreationTime time.Time
 
 	// Identifies the group the message belongs to.
-	GroupID string
+	GroupID *string
 
 	// The relative position of this message within its group.
 	GroupSequence uint32 // RFC-1982 sequence number
@@ -441,7 +441,7 @@ func (p *MessageProperties) Marshal(wr *buffer.Buffer) error {
 		{Value: (*encoding.Symbol)(&p.ContentEncoding), Omit: p.ContentEncoding == ""},
 		{Value: &p.AbsoluteExpiryTime, Omit: p.AbsoluteExpiryTime.IsZero()},
 		{Value: &p.CreationTime, Omit: p.CreationTime.IsZero()},
-		{Value: &p.GroupID, Omit: p.GroupID == ""},
+		{Value: &p.GroupID},
 		{Value: &p.GroupSequence},
 		{Value: &p.ReplyToGroupID, Omit: p.ReplyToGroupID == ""},
 	})
