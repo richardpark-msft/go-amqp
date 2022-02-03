@@ -2,6 +2,7 @@ package amqp
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -58,7 +59,7 @@ func (r *Receiver) Prefetched(ctx context.Context) (*Message, error) {
 	// delivered regardless of whether the link has been closed.
 	select {
 	case msg := <-r.link.Messages:
-		debug(3, "Receive() non blocking %d", msg.deliveryID)
+		debug(3, "Receive() non blocking %d", msg.DeliveryID)
 		msg.link = r.link
 		return acceptIfModeFirst(ctx, r, &msg)
 	case <-ctx.Done():
@@ -85,7 +86,7 @@ func (r *Receiver) Receive(ctx context.Context) (*Message, error) {
 	// wait for the next message
 	select {
 	case msg := <-r.link.Messages:
-		debug(3, "Receive() blocking %d", msg.deliveryID)
+		debug(3, "Receive() blocking %d", msg.DeliveryID)
 		msg.link = r.link
 		return acceptIfModeFirst(ctx, r, &msg)
 	case <-r.link.Detached:
@@ -115,6 +116,12 @@ func (r *Receiver) AcceptMessage(ctx context.Context, msg *Message) error {
 		return nil
 	}
 	return r.messageDisposition(ctx, msg, &encoding.StateAccepted{})
+}
+
+// Accept notifies the server that the delivery has been
+// accepted and does not require redelivery.
+func (r *Receiver) AcceptDelivery(ctx context.Context, deliveryID uint32, deliveryTag []byte) error {
+	return r.messageDispositionInternal(ctx, deliveryID, deliveryTag, &encoding.StateAccepted{})
 }
 
 // Reject notifies the server that the message is invalid.
@@ -292,17 +299,22 @@ func (r *Receiver) sendDisposition(first uint32, last *uint32, state encoding.De
 	return r.link.Session.txFrame(fr, nil)
 }
 
-func (r *Receiver) messageDisposition(ctx context.Context, msg *Message, state encoding.DeliveryState) error {
+type DM interface {
+	GetDeliveryData() (uint32, []byte)
+	SetSettled()
+}
+
+func (r *Receiver) messageDispositionInternal(ctx context.Context, deliveryID uint32, deliveryTag []byte, state encoding.DeliveryState) error {
 	var wait chan error
 	if r.link.ReceiverSettleMode != nil && *r.link.ReceiverSettleMode == ModeSecond {
-		debug(3, "RX (messageDisposition): add %d to inflight", msg.deliveryID)
-		wait = r.inFlight.add(msg.deliveryID)
+		debug(3, "RX (messageDisposition): add %d to inflight", deliveryID)
+		wait = r.inFlight.add(deliveryID)
 	}
 
 	if r.batching {
-		r.dispositions <- messageDisposition{id: msg.deliveryID, state: state}
+		r.dispositions <- messageDisposition{id: deliveryID, state: state}
 	} else {
-		err := r.sendDisposition(msg.deliveryID, nil, state)
+		err := r.sendDisposition(deliveryID, nil, state)
 		if err != nil {
 			return err
 		}
@@ -315,12 +327,24 @@ func (r *Receiver) messageDisposition(ctx context.Context, msg *Message, state e
 	select {
 	case err := <-wait:
 		// we've received confirmation of disposition
-		r.link.DeleteUnsettled(msg)
-		msg.settled = true
+		r.link.DeleteUnsettled(deliveryTag)
+		// msg.settled = true
 		return err
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func (r *Receiver) messageDisposition(ctx context.Context, msg *Message, state encoding.DeliveryState) error {
+	if err := r.messageDispositionInternal(ctx, msg.DeliveryID, msg.DeliveryTag, state); err != nil {
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			msg.settled = true
+		}
+		return err
+	}
+
+	msg.settled = true
+	return nil
 }
 
 // inFlight tracks in-flight message dispositions allowing receivers

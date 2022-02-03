@@ -104,7 +104,7 @@ type Message struct {
 	SendSettled bool
 
 	link       *link  // the receiving link
-	deliveryID uint32 // used when sending disposition
+	DeliveryID uint32 // used when sending disposition
 	settled    bool   // whether transfer was settled by sender
 }
 

@@ -265,9 +265,9 @@ func (l *link) addUnsettled(msg *Message) {
 }
 
 // DeleteUnsettled removes the message from the map of unsettled messages.
-func (l *link) DeleteUnsettled(msg *Message) {
+func (l *link) DeleteUnsettled(deliveryTag []byte) {
 	l.unsettledMessagesLock.Lock()
-	delete(l.unsettledMessages, string(msg.DeliveryTag))
+	delete(l.unsettledMessages, string(deliveryTag))
 	l.unsettledMessagesLock.Unlock()
 }
 
@@ -471,7 +471,7 @@ func (l *link) muxReceive(fr frames.PerformTransfer) error {
 		// record the delivery ID, message format,
 		// and delivery Tag
 		if fr.DeliveryID != nil {
-			l.msg.deliveryID = *fr.DeliveryID
+			l.msg.DeliveryID = *fr.DeliveryID
 		}
 		if fr.MessageFormat != nil {
 			l.msg.Format = *fr.MessageFormat
@@ -503,10 +503,10 @@ func (l *link) muxReceive(fr frames.PerformTransfer) error {
 		// but if they are included they must be consistent
 		// with the first.
 
-		if fr.DeliveryID != nil && *fr.DeliveryID != l.msg.deliveryID {
+		if fr.DeliveryID != nil && *fr.DeliveryID != l.msg.DeliveryID {
 			msg := fmt.Sprintf(
 				"received continuation transfer with inconsistent delivery-id: %d != %d",
-				*fr.DeliveryID, l.msg.deliveryID,
+				*fr.DeliveryID, l.msg.DeliveryID,
 			)
 			return l.closeWithError(&Error{
 				Condition:   ErrorNotAllowed,
@@ -569,7 +569,7 @@ func (l *link) muxReceive(fr frames.PerformTransfer) error {
 	if err != nil {
 		return err
 	}
-	debug(1, "deliveryID %d before push to receiver - deliveryCount : %d - linkCredit: %d, len(messages): %d, len(inflight): %d", l.msg.deliveryID, l.deliveryCount, l.linkCredit, len(l.Messages), l.receiver.inFlight.len())
+	debug(1, "deliveryID %d before push to receiver - deliveryCount : %d - linkCredit: %d, len(messages): %d, len(inflight): %d", l.msg.DeliveryID, l.deliveryCount, l.linkCredit, len(l.Messages), l.receiver.inFlight.len())
 	// send to receiver
 	if receiverSettleModeValue(l.ReceiverSettleMode) == ModeSecond {
 		l.addUnsettled(&l.msg)
@@ -582,7 +582,7 @@ func (l *link) muxReceive(fr frames.PerformTransfer) error {
 		return l.err
 	}
 
-	debug(1, "deliveryID %d after push to receiver - deliveryCount : %d - linkCredit: %d, len(messages): %d, len(inflight): %d", l.msg.deliveryID, l.deliveryCount, l.linkCredit, len(l.Messages), l.receiver.inFlight.len())
+	debug(1, "deliveryID %d after push to receiver - deliveryCount : %d - linkCredit: %d, len(messages): %d, len(inflight): %d", l.msg.DeliveryID, l.deliveryCount, l.linkCredit, len(l.Messages), l.receiver.inFlight.len())
 
 	// reset progress
 	l.buf.Reset()
@@ -591,7 +591,7 @@ func (l *link) muxReceive(fr frames.PerformTransfer) error {
 	// decrement link-credit after entire message received
 	l.deliveryCount++
 	l.linkCredit--
-	debug(1, "deliveryID %d before exit - deliveryCount : %d - linkCredit: %d, len(messages): %d", l.msg.deliveryID, l.deliveryCount, l.linkCredit, len(l.Messages))
+	debug(1, "deliveryID %d before exit - deliveryCount : %d - linkCredit: %d, len(messages): %d", l.msg.DeliveryID, l.deliveryCount, l.linkCredit, len(l.Messages))
 	return nil
 }
 
