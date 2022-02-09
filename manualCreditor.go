@@ -82,10 +82,10 @@ func (mc *manualCreditor) Drain(ctx context.Context, l *link) error {
 	case <-l.Detached:
 		// NOTE: need to be careful to not pass back a nil *Error when you're
 		// returning an `error` interface!
-		if l.detachError == nil {
+		if l.error == nil {
 			return nil
 		}
-		return l.detachError
+		return l.error
 	case <-ctx.Done():
 		return ctx.Err()
 	}

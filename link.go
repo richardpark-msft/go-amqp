@@ -34,13 +34,14 @@ type link struct {
 	// This will be initiated if the service sends back an error or requests the link detach.
 	Detached chan struct{}
 
-	detachErrorMu sync.Mutex                      // protects detachError
-	detachError   *Error                          // error to send to remote on detach, set by closeWithError
-	Session       *Session                        // parent session
-	receiver      *Receiver                       // allows link options to modify Receiver
-	Source        *frames.Source                  // used for Receiver links
-	Target        *frames.Target                  // used for Sender links
-	properties    map[encoding.Symbol]interface{} // additional properties sent upon link attach
+	errorMu sync.Mutex // protects detachError
+	error   *Error     // error to send to remote on detach, set by closeWithError
+
+	Session    *Session                        // parent session
+	receiver   *Receiver                       // allows link options to modify Receiver
+	Source     *frames.Source                  // used for Receiver links
+	Target     *frames.Target                  // used for Sender links
+	properties map[encoding.Symbol]interface{} // additional properties sent upon link attach
 	// Indicates whether we should allow detaches on disposition errors or not.
 	// Some AMQP servers (like Event Hubs) benefit from keeping the link open on disposition errors
 	// (for instance, if you're doing many parallel sends over the same link and you get back a
@@ -784,9 +785,9 @@ func (l *link) Close(ctx context.Context) error {
 // returns the error passed in
 func (l *link) closeWithError(de *Error) error {
 	l.closeOnce.Do(func() {
-		l.detachErrorMu.Lock()
-		l.detachError = de
-		l.detachErrorMu.Unlock()
+		l.errorMu.Lock()
+		l.error = de
+		l.errorMu.Unlock()
 		close(l.close)
 	})
 	return de
@@ -839,9 +840,9 @@ func (l *link) muxDetach() {
 	// the partner MUST signal that it has closed the link by
 	// reattaching and then sending a closing detach."
 
-	l.detachErrorMu.Lock()
-	detachError := l.detachError
-	l.detachErrorMu.Unlock()
+	l.errorMu.Lock()
+	detachError := l.error
+	l.errorMu.Unlock()
 
 	fr := &frames.PerformDetach{
 		Handle: l.Handle,
