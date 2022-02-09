@@ -112,3 +112,16 @@ func TestManualCreditorDrainRespectsContext(t *testing.T) {
 
 	require.Error(t, mc.Drain(ctx, newTestLink(t)), context.Canceled.Error())
 }
+
+func TestManualCreditorDrainReturnsProperNilError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*2)
+	defer cancel()
+
+	mc := manualCreditor{}
+	link := newTestLink(t)
+
+	link.detachError = (*Error)(nil)
+	close(link.Detached)
+
+	require.NoError(t, mc.Drain(ctx, link))
+}

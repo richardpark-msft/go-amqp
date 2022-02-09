@@ -223,6 +223,7 @@ func newTestLink(t *testing.T) *link {
 			// debug(1, "FLOW Link Mux half: source: %s, inflight: %d, credit: %d, deliveryCount: %d, messages: %d, unsettled: %d, maxCredit : %d, settleMode: %s", l.source.Address, l.receiver.inFlight.len(), l.linkCredit, l.deliveryCount, len(l.messages), l.countUnsettled(), l.receiver.maxCredit, l.receiverSettleMode.String())
 			inFlight: inFlight{},
 		},
+		Detached: make(chan struct{}),
 		Session: &Session{
 			tx:   make(chan frames.FrameBody, 100),
 			done: make(chan struct{}),
