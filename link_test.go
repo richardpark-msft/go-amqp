@@ -224,6 +224,7 @@ func newTestLink(t *testing.T) *link {
 			inFlight: inFlight{},
 		},
 		Detached: make(chan struct{}),
+		close:    make(chan struct{}),
 		Session: &Session{
 			tx:   make(chan frames.FrameBody, 100),
 			done: make(chan struct{}),

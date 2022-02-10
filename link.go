@@ -35,7 +35,7 @@ type link struct {
 	Detached chan struct{}
 
 	detachErrorMu sync.Mutex // protects detachError
-	detachError   *Error     // error to send to remote on detach, set by closeWithError
+	detachError   error      // error to send to remote on detach, set by closeWithError
 
 	Session    *Session                        // parent session
 	receiver   *Receiver                       // allows link options to modify Receiver
@@ -784,13 +784,22 @@ func (l *link) Close(ctx context.Context) error {
 
 // returns the error passed in
 func (l *link) closeWithError(de *Error) error {
+	var err error
+
+	// NOTE: need to be careful to not pass back a nil *Error when you're
+	// returning an `error` interface!
+	if de != nil {
+		err = de
+	}
+
 	l.closeOnce.Do(func() {
 		l.detachErrorMu.Lock()
-		l.detachError = de
+		l.detachError = err
 		l.detachErrorMu.Unlock()
 		close(l.close)
 	})
-	return de
+
+	return err
 }
 
 func (l *link) muxDetach() {
@@ -841,8 +850,12 @@ func (l *link) muxDetach() {
 	// reattaching and then sending a closing detach."
 
 	l.detachErrorMu.Lock()
-	detachError := l.detachError
+	detachError, ok := l.detachError.(*Error)
 	l.detachErrorMu.Unlock()
+
+	if !ok {
+		detachError = nil
+	}
 
 	fr := &frames.PerformDetach{
 		Handle: l.Handle,
