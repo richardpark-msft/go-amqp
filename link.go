@@ -34,8 +34,8 @@ type link struct {
 	// This will be initiated if the service sends back an error or requests the link detach.
 	Detached chan struct{}
 
-	errorMu sync.Mutex // protects detachError
-	error   *Error     // error to send to remote on detach, set by closeWithError
+	detachErrorMu sync.Mutex // protects detachError
+	detachError   *Error     // error to send to remote on detach, set by closeWithError
 
 	Session    *Session                        // parent session
 	receiver   *Receiver                       // allows link options to modify Receiver
@@ -785,9 +785,9 @@ func (l *link) Close(ctx context.Context) error {
 // returns the error passed in
 func (l *link) closeWithError(de *Error) error {
 	l.closeOnce.Do(func() {
-		l.errorMu.Lock()
-		l.error = de
-		l.errorMu.Unlock()
+		l.detachErrorMu.Lock()
+		l.detachError = de
+		l.detachErrorMu.Unlock()
 		close(l.close)
 	})
 	return de
@@ -840,9 +840,9 @@ func (l *link) muxDetach() {
 	// the partner MUST signal that it has closed the link by
 	// reattaching and then sending a closing detach."
 
-	l.errorMu.Lock()
-	detachError := l.error
-	l.errorMu.Unlock()
+	l.detachErrorMu.Lock()
+	detachError := l.detachError
+	l.detachErrorMu.Unlock()
 
 	fr := &frames.PerformDetach{
 		Handle: l.Handle,

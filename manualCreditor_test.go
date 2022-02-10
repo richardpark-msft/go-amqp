@@ -120,7 +120,7 @@ func TestManualCreditorDrainReturnsProperNilError(t *testing.T) {
 	mc := manualCreditor{}
 	link := newTestLink(t)
 
-	link.error = (*Error)(nil)
+	link.detachError = (*Error)(nil)
 	close(link.Detached)
 
 	require.NoError(t, mc.Drain(ctx, link))
