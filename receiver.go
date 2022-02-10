@@ -318,6 +318,11 @@ func (r *Receiver) messageDisposition(ctx context.Context, msg *Message, state e
 		r.link.DeleteUnsettled(msg)
 		msg.settled = true
 		return err
+	case <-r.link.close:
+		return ErrLinkClosed
+	case <-r.link.Detached:
+		// TODO: pretty sure this isn't correct.
+		return r.link.detachError
 	case <-ctx.Done():
 		return ctx.Err()
 	}
