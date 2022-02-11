@@ -98,8 +98,14 @@ func (r *Receiver) Receive(ctx context.Context) (*Message, error) {
 	}
 }
 
-func asDetachedError(err error) *DetachError {
+func asDetachedError(err error) error {
 	var asDetachErr *DetachError
+
+	if errors.Is(err, ErrConnClosed) ||
+		errors.Is(err, ErrSessionClosed) ||
+		errors.Is(err, ErrLinkClosed) {
+		return err
+	}
 
 	// don't wrap it twice.
 	if errors.As(err, &asDetachErr) {
@@ -110,9 +116,7 @@ func asDetachedError(err error) *DetachError {
 
 	// if we have an amqp.Error we should definitely include that
 	if errors.As(err, &asEncodingErr) {
-		return &DetachError{
-			RemoteError: asEncodingErr,
-		}
+		return asEncodingErr
 	}
 
 	// manufacture one and try to preserve error information. These will

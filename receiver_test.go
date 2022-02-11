@@ -116,13 +116,11 @@ func TestReceiverOnClosed(t *testing.T) {
 	require.NoError(t, r.Close(ctx))
 	cancel()
 
-	var de *DetachError
-
-	if err = <-errChan; !errors.As(err, &de) {
+	if err = <-errChan; !errors.Is(err, ErrLinkClosed) {
 		t.Fatalf("unexpected error %v", err)
 	}
 	_, err = r.Receive(context.Background())
-	if !errors.As(err, &de) {
+	if !errors.Is(err, ErrLinkClosed) {
 		t.Fatalf("unexpected error %v", err)
 	}
 }
@@ -146,13 +144,11 @@ func TestReceiverOnSessionClosed(t *testing.T) {
 	require.NoError(t, session.Close(ctx))
 	cancel()
 
-	var de *DetachError
-
-	if err = <-errChan; !errors.As(err, &de) {
+	if err = <-errChan; !errors.Is(err, ErrSessionClosed) {
 		t.Fatalf("unexpected error %v", err)
 	}
 	_, err = r.Receive(context.Background())
-	if !errors.As(err, &de) {
+	if !errors.Is(err, ErrSessionClosed) {
 		t.Fatalf("unexpected error %v", err)
 	}
 }
@@ -174,13 +170,11 @@ func TestReceiverOnConnClosed(t *testing.T) {
 
 	require.NoError(t, client.Close())
 
-	var de *DetachError
-
-	if err = <-errChan; !errors.As(err, &de) {
+	if err = <-errChan; !errors.Is(err, ErrConnClosed) {
 		t.Fatalf("unexpected error %v", err)
 	}
 	_, err = r.Receive(context.Background())
-	if !errors.As(err, &de) {
+	if !errors.Is(err, ErrConnClosed) {
 		t.Fatalf("unexpected error %v", err)
 	}
 }
@@ -270,15 +264,21 @@ func TestReceiverReceiveOnNetworkDetach(t *testing.T) {
 		require.Equal(t, de, asDetachedError(de))
 	})
 
-	t.Run("amqpErrorsAreStillReturnedDirectly", func(t *testing.T) {
-		e := &encoding.Error{
-			Condition: "artificalCondition",
+	t.Run("certainErrorsReturnedDirectly", func(t *testing.T) {
+		var errs = []error{
+			&encoding.Error{
+				Condition: "anEncodingError",
+			},
+			ErrLinkClosed,
+			ErrConnClosed,
+			ErrSessionClosed,
 		}
 
-		// if we already have an amqp.Error{} we return it, but wrap it in a DetachError
-		require.Equal(t, &DetachError{
-			RemoteError: e,
-		}, asDetachedError(e))
+		for i, err := range errs {
+			t.Run(fmt.Sprintf("[%d] %s", i, err.Error()), func(t *testing.T) {
+				require.Equal(t, err, asDetachedError(err))
+			})
+		}
 	})
 }
 
@@ -323,14 +323,14 @@ func TestReceiveInvalidMessage(t *testing.T) {
 	conn.SendFrame(fr)
 
 	assert.Nil(t, <-msgChan)
-	var detachErr *DetachError
-	if err = <-errChan; !errors.As(err, &detachErr) {
+	var amqpErr *encoding.Error
+	if err = <-errChan; !errors.As(err, &amqpErr) {
 		t.Fatalf("unexpected error %v", err)
 	}
-	assert.Equal(t, ErrorNotAllowed, detachErr.RemoteError.Condition)
+	assert.Equal(t, ErrorNotAllowed, amqpErr.Condition)
 
 	_, err = r.Receive(context.Background())
-	if !errors.As(err, &detachErr) {
+	if !errors.As(err, &amqpErr) {
 		t.Fatalf("unexpected error %v", err)
 	}
 
@@ -350,13 +350,13 @@ func TestReceiveInvalidMessage(t *testing.T) {
 	conn.SendFrame(fr)
 
 	assert.Nil(t, <-msgChan)
-	if err = <-errChan; !errors.As(err, &detachErr) {
+	if err = <-errChan; !errors.As(err, &amqpErr) {
 		t.Fatalf("unexpected error %v", err)
 	}
-	assert.Equal(t, ErrorNotAllowed, detachErr.RemoteError.Condition)
+	assert.Equal(t, ErrorNotAllowed, amqpErr.Condition)
 
 	_, err = r.Receive(context.Background())
-	if !errors.As(err, &detachErr) {
+	if !errors.As(err, &amqpErr) {
 		t.Fatalf("unexpected error %v", err)
 	}
 
@@ -378,13 +378,13 @@ func TestReceiveInvalidMessage(t *testing.T) {
 	conn.SendFrame(fr)
 
 	assert.Nil(t, <-msgChan)
-	if err = <-errChan; !errors.As(err, &detachErr) {
+	if err = <-errChan; !errors.As(err, &amqpErr) {
 		t.Fatalf("unexpected error %v", err)
 	}
-	assert.Equal(t, ErrorNotAllowed, detachErr.RemoteError.Condition)
+	assert.Equal(t, ErrorNotAllowed, amqpErr.Condition)
 
 	_, err = r.Receive(context.Background())
-	if !errors.As(err, &detachErr) {
+	if !errors.As(err, &amqpErr) {
 		t.Fatalf("unexpected error %v", err)
 	}
 
@@ -877,11 +877,11 @@ func TestReceiveInvalidMultiFrameMessage(t *testing.T) {
 	}))
 	msg := <-msgChan
 	assert.Nil(t, msg)
-	var detachErr *DetachError
-	if err = <-errChan; !errors.As(err, &detachErr) {
+	var amqpErr *encoding.Error
+	if err = <-errChan; !errors.As(err, &amqpErr) {
 		t.Fatalf("unexpected error %v", err)
 	}
-	assert.Equal(t, ErrorNotAllowed, detachErr.RemoteError.Condition)
+	assert.Equal(t, ErrorNotAllowed, amqpErr.Condition)
 
 	// mismatched MessageFormat
 	r, err = session.NewReceiver(LinkReceiverSettle(ModeSecond))
@@ -901,10 +901,10 @@ func TestReceiveInvalidMultiFrameMessage(t *testing.T) {
 	}))
 	msg = <-msgChan
 	assert.Nil(t, msg)
-	if err = <-errChan; !errors.As(err, &detachErr) {
+	if err = <-errChan; !errors.As(err, &amqpErr) {
 		t.Fatalf("unexpected error %v", err)
 	}
-	assert.Equal(t, ErrorNotAllowed, detachErr.RemoteError.Condition)
+	assert.Equal(t, ErrorNotAllowed, amqpErr.Condition)
 
 	// mismatched DeliveryTag
 	r, err = session.NewReceiver(LinkReceiverSettle(ModeSecond))
@@ -923,10 +923,10 @@ func TestReceiveInvalidMultiFrameMessage(t *testing.T) {
 	}))
 	msg = <-msgChan
 	assert.Nil(t, msg)
-	if err = <-errChan; !errors.As(err, &detachErr) {
+	if err = <-errChan; !errors.As(err, &amqpErr) {
 		t.Fatalf("unexpected error %v", err)
 	}
-	assert.Equal(t, ErrorNotAllowed, detachErr.RemoteError.Condition)
+	assert.Equal(t, ErrorNotAllowed, amqpErr.Condition)
 
 	assert.NoError(t, client.Close())
 }
@@ -1017,11 +1017,11 @@ func TestReceiveMessageTooBig(t *testing.T) {
 	msg, err := r.Receive(ctx)
 	cancel()
 	assert.Nil(t, msg)
-	var detachErr *DetachError
-	if !errors.As(err, &detachErr) {
+	var amqpErr *encoding.Error
+	if !errors.As(err, &amqpErr) {
 		t.Fatalf("unexpected error %v", err)
 	}
-	assert.Equal(t, ErrorMessageSizeExceeded, detachErr.RemoteError.Condition)
+	assert.Equal(t, ErrorMessageSizeExceeded, amqpErr.Condition)
 	assert.NoError(t, client.Close())
 }
 
