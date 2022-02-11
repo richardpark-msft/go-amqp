@@ -2,6 +2,7 @@ package amqp
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -89,10 +90,38 @@ func (r *Receiver) Receive(ctx context.Context) (*Message, error) {
 		msg.link = r.link
 		return acceptIfModeFirst(ctx, r, &msg)
 	case <-r.link.Detached:
-		return nil, r.link.err
+		// TODO: it'd be nice to address the issue at the source (ie, when the 'error' is added
+		// make sure it's one of the actionable types)
+		return nil, asDetachedError(r.link.err)
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+func asDetachedError(err error) *DetachError {
+	var asDetachErr *DetachError
+
+	// don't wrap it twice.
+	if errors.As(err, &asDetachErr) {
+		return asDetachErr
+	}
+
+	var asEncodingErr *encoding.Error
+
+	// if we have an amqp.Error we should definitely include that
+	if errors.As(err, &asEncodingErr) {
+		return &DetachError{
+			RemoteError: asEncodingErr,
+		}
+	}
+
+	// manufacture one and try to preserve error information. These will
+	// be system errors where the user's only real action is to recreate
+	// the link.
+	return &DetachError{RemoteError: &encoding.Error{
+		Condition:   ErrorDetachForced,
+		Description: err.Error(),
+	}}
 }
 
 // acceptIfModeFirst auto-accepts a message if we are in mode first, otherwise it no-ops.
