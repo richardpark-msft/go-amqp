@@ -580,6 +580,8 @@ func (l *link) muxReceive(fr frames.PerformTransfer) error {
 	case <-l.close:
 		// link is being closed
 		return l.err
+	default:
+		panic("We blocked attempting to add a message and this should never happen")
 	}
 
 	debug(1, "deliveryID %d after push to receiver - deliveryCount : %d - linkCredit: %d, len(messages): %d, len(inflight): %d", l.msg.deliveryID, l.deliveryCount, l.linkCredit, len(l.Messages), l.receiver.inFlight.len())
