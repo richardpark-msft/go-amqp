@@ -763,6 +763,7 @@ func (c *Conn) connWriter() {
 			}
 
 			debug.Log(1, "TX (connWriter %p) timeout %s: %s", c, timeout, env.Frame)
+
 			err = c.writeFrame(timeout, env.Frame)
 			if env.Sent != nil {
 				if err == nil {
@@ -858,6 +859,15 @@ func (c *Conn) sendFrame(ctx context.Context, fr frames.Frame, sent chan error) 
 	select {
 	case c.txFrame <- frameEnvelope{Ctx: ctx, Frame: fr, Sent: sent}:
 		debug.Log(2, "TX (Conn %p): mux frame to connWriter: %s", c, fr)
+	// cancelling here should be considered safe as nothing has hit the network yet
+	// so our local vs remote state should still be consistent.
+	case <-ctx.Done():
+		if sent != nil {
+			// this isn't quite right - we didn't actually send the frame - ie, this should
+			// be considered cleanly unwindable from the callers perspective. So I'd want
+			// some way to signal that properly to the caller.
+			sent <- ctx.Err()
+		}
 	case <-c.done:
 		if sent != nil {
 			sent <- c.doneErr
@@ -1114,6 +1124,11 @@ func (c *Conn) readSingleFrame() (frames.Frame, error) {
 // or the default write timeout if the context has no deadline.
 // if the context has timed out or was cancelled, an error is returned.
 func (c *Conn) getWriteTimeout(ctx context.Context) (time.Duration, error) {
+	if ctx.Err() != nil {
+		// if the context is already cancelled we can just bail.
+		return 0, ctx.Err()
+	}
+
 	if deadline, ok := ctx.Deadline(); ok {
 		until := time.Until(deadline)
 		if until <= 0 {
@@ -1121,6 +1136,7 @@ func (c *Conn) getWriteTimeout(ctx context.Context) (time.Duration, error) {
 		}
 		return until, nil
 	}
+
 	return c.writeTimeout, nil
 }
 

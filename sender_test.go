@@ -1246,3 +1246,79 @@ func TestSenderUnexpectedFrame(t *testing.T) {
 	require.ErrorContains(t, err, "unexpected frame *frames.PerformTransfer")
 	require.NoError(t, client.Close())
 }
+
+func TestSenderCancelledBeforeTransferToSession(t *testing.T) {
+	netConn := fake.NewNetConn(senderFrameHandlerNoUnhandled(0, SenderSettleModeUnsettled))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	client, err := NewConn(ctx, netConn, nil)
+	cancel()
+	require.NoError(t, err)
+
+	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
+	session, err := client.NewSession(ctx, nil)
+	cancel()
+	require.NoError(t, err)
+
+	hit := false
+
+	var sender *Sender
+	sender, err = newSenderWithHooks(context.Background(), session, "target", nil, senderTestHooks{MuxTransfer: func() {
+		// make it so the session appears blocked.
+		sender.l.session.txTransfer = nil
+		hit = true
+		cancel()
+	}})
+	require.NoError(t, err)
+
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+
+	sender.l.linkCredit = 100
+
+	// TODO: sometimes this comes back as an amqp.SessionError, wrapping a context.Canceled,
+	// instead of a context.Canceled
+	err = sender.Send(ctx, &Message{Value: []byte("hello world")}, nil)
+	t.Logf("%T, %v\n", err, err)
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.True(t, hit)
+}
+
+func TestSenderCancelledBeforeTransferToConnection(t *testing.T) {
+	netConn := fake.NewNetConn(senderFrameHandlerNoUnhandled(0, SenderSettleModeUnsettled))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	client, err := NewConn(ctx, netConn, nil)
+	cancel()
+	require.NoError(t, err)
+
+	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
+	session, err := client.NewSession(ctx, nil)
+	cancel()
+	require.NoError(t, err)
+
+	hit := false
+
+	var sender *Sender
+	sender, err = newSenderWithHooks(context.Background(), session, "target", nil, senderTestHooks{MuxTransfer: func() {
+		// make it so no frames can be sent on the connection
+		sender.l.session.conn.txFrame = nil
+		hit = true
+
+		go func() {
+			<-time.After(3 * time.Second)
+			cancel()
+		}()
+	}})
+	require.NoError(t, err)
+
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+
+	sender.l.linkCredit = 100
+
+	err = sender.Send(ctx, &Message{Value: []byte("hello world")}, nil)
+	require.ErrorIs(t, err, context.Canceled)
+	require.True(t, hit)
+}

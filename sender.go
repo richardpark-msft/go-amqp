@@ -364,6 +364,13 @@ Loop:
 		case env := <-outgoingTransfers:
 			hooks.MuxTransfer()
 			select {
+			case <-env.Ctx.Done():
+				// nothing's been sent here, should be perfectly safe to return immediately.
+				// this doesn't invalidate the sender's local state.
+				if env.Sent != nil {
+					env.Sent <- env.Ctx.Err()
+				}
+				continue Loop
 			case s.l.session.txTransfer <- env:
 				debug.Log(2, "TX (Sender %p): mux transfer to Session: %d, %s", s, s.l.session.channel, env.Frame)
 				// decrement link-credit after entire message transferred

@@ -645,12 +645,21 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 			}
 
 			s.txFrame(env.Ctx, fr, env.Sent)
+
 			if sendErr := <-env.Sent; sendErr != nil {
 				s.doneErr = sendErr
 
 				// put the error back as our sender will read from this channel
 				env.Sent <- sendErr
-				return
+
+				if errors.Is(sendErr, context.Canceled) || errors.Is(sendErr, context.DeadlineExceeded) {
+					// if we cancelled/deadline'd when trying to send on the Conn you get a ConnError, not a
+					// cancellation. So _these_ errors are definitely because the user cancelled BEFORE we
+					// hit the network, which shouldn't leave us in an inconsistent state.
+					continue
+				} else {
+					return
+				}
 			}
 
 			// if not settled, add done chan to map

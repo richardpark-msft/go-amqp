@@ -987,3 +987,78 @@ func TestNewSessionWriteError(t *testing.T) {
 		t.Fatal("unexpected ack")
 	}
 }
+
+func TestConn_getWriteTimeout(t *testing.T) {
+	const channelNum = 0
+	responder := func(remoteChannel uint16, req frames.FrameBody) ([]byte, error) {
+		switch tt := req.(type) {
+		case *fake.AMQPProto:
+			return []byte{'A', 'M', 'Q', 'P', 0, 1, 0, 0}, nil
+		case *frames.PerformOpen:
+			return fake.PerformOpen("container")
+		case *frames.PerformBegin:
+			if tt.RemoteChannel != nil {
+				return nil, errors.New("expected nil remote channel")
+			}
+			return fake.PerformBegin(channelNum, remoteChannel)
+		case *frames.PerformClose:
+			return fake.PerformClose(nil)
+		default:
+			return nil, fmt.Errorf("unhandled frame %T", req)
+		}
+	}
+	netConn := fake.NewNetConn(responder)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	client, err := NewConn(ctx, netConn, nil)
+	cancel()
+	require.NoError(t, err)
+
+	client.writeTimeout = time.Hour
+
+	t.Run("ContextAlreadyCancelled", func(t *testing.T) {
+		// precancelled context
+		ctx, cancel = context.WithCancel(context.Background())
+		cancel()
+
+		dur, err := client.getWriteTimeout(ctx)
+		require.Zero(t, dur)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("ContextAlreadyTimedOut", func(t *testing.T) {
+		ctx, cancel = context.WithTimeout(context.Background(), 0)
+		defer cancel()
+
+		dur, err := client.getWriteTimeout(ctx)
+		require.Zero(t, dur)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+
+	t.Run("NoDeadlineInheritsDefault", func(t *testing.T) {
+		ctx, cancel = context.WithCancel(context.Background())
+		defer cancel()
+
+		dur, err := client.getWriteTimeout(ctx)
+		require.NoError(t, err)
+		require.Equal(t, client.writeTimeout, dur)
+	})
+
+	t.Run("NoDeadlineInheritsDefault", func(t *testing.T) {
+		ctx, cancel = context.WithCancel(context.Background())
+		defer cancel()
+
+		dur, err := client.getWriteTimeout(ctx)
+		require.NoError(t, err)
+		require.Equal(t, client.writeTimeout, dur)
+	})
+
+	t.Run("WithDeadlineIgnoresDefault", func(t *testing.T) {
+		ctx, cancel = context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+
+		dur, err := client.getWriteTimeout(ctx)
+		require.NoError(t, err)
+		require.NotEqual(t, client.writeTimeout, dur)
+	})
+}
