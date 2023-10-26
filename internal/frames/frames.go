@@ -348,6 +348,25 @@ func (t Target) String() string {
 	)
 }
 
+// CoordinatorTarget is used to declare a transaction (sent as the Target when sending our
+// ATTACH frame) and is also returned in the response ATTACH frame.
+// Spec: http://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-transactions-v1.0-os.html#section-txn-declare
+type CoordinatorTarget struct {
+	Capabilities []encoding.Symbol
+}
+
+func (c *CoordinatorTarget) Marshal(wr *buffer.Buffer) error {
+	return encoding.MarshalComposite(wr, encoding.TypeCodeTransactionCoordinator, []encoding.MarshalField{
+		{Value: &c.Capabilities, Omit: c.Capabilities == nil},
+	})
+}
+
+func (c *CoordinatorTarget) Unmarshal(r *buffer.Buffer) error {
+	return encoding.UnmarshalComposite(r, encoding.TypeCodeTransactionCoordinator,
+		encoding.UnmarshalField{Field: &c.Capabilities},
+	)
+}
+
 // frame is the decoded representation of a frame
 type Frame struct {
 	Type    Type      // AMQP/SASL
@@ -637,7 +656,11 @@ type PerformAttach struct {
 	//
 	// If no target is specified on an incoming link, then there is no target currently
 	// attached to the link. A link with no target will never permit incoming messages.
-	Target *Target
+	//
+	// Target can be one of two types:
+	// - A [Target], used for Senders and Receivers.
+	// - A [CoordinatorTarget], used when creating a [amqp.TransactionController].
+	Target any
 
 	// unsettled delivery state
 	//
@@ -743,6 +766,9 @@ func (a *PerformAttach) Marshal(wr *buffer.Buffer) error {
 }
 
 func (a *PerformAttach) Unmarshal(r *buffer.Buffer) error {
+
+	UnmarshalMultipleComposite(r)
+
 	return encoding.UnmarshalComposite(r, encoding.TypeCodeAttach, []encoding.UnmarshalField{
 		{Field: &a.Name, HandleNull: func() error { return errors.New("Attach.Name is required") }},
 		{Field: &a.Handle, HandleNull: func() error { return errors.New("Attach.Handle is required") }},

@@ -230,10 +230,26 @@ func Unmarshal(r *buffer.Buffer, i any) error {
 	return nil
 }
 
+func UnmarshalMultipleComposite(r *buffer.Buffer, typeToFields map[AMQPType][]UnmarshalField) error {
+	amqpType, err := peekType(r)
+
+	if err != nil {
+		return err
+	}
+
+	fields, exists := typeToFields[amqpType]
+
+	if !exists {
+		return fmt.Errorf("unhandled type %d", amqpType)
+	}
+
+	return UnmarshalComposite(r, amqpType, fields...)
+}
+
 // unmarshalComposite is a helper for use in a composite's unmarshal() function.
 //
 // The composite from r will be unmarshaled into zero or more fields. An error
-// will be returned if typ does not match the decoded type.
+// will be returned if type does not match the decoded type.
 func UnmarshalComposite(r *buffer.Buffer, type_ AMQPType, fields ...UnmarshalField) error {
 	cType, numFields, err := readCompositeHeader(r)
 	if err != nil {

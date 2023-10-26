@@ -59,14 +59,6 @@ type SendOptions struct {
 // additional messages can be sent while the current goroutine is waiting
 // for the confirmation.
 func (s *Sender) Send(ctx context.Context, msg *Message, opts *SendOptions) error {
-	// check if the link is dead.  while it's safe to call s.send
-	// in this case, this will avoid some allocations etc.
-	select {
-	case <-s.l.done:
-		return s.l.doneErr
-	default:
-		// link is still active
-	}
 	done, err := s.send(ctx, msg, opts)
 	if err != nil {
 		return err
@@ -90,6 +82,36 @@ func (s *Sender) Send(ctx context.Context, msg *Message, opts *SendOptions) erro
 	}
 }
 
+func (s *Sender) declareTransaction(ctx context.Context, msg *Message, opts *SendOptions) (any, error) {
+	ch, err := s.send(ctx, msg, opts)
+
+	if err != nil {
+		return nil, err
+	}
+
+	select {
+	case ds := <-ch:
+		// this part of the dance is covered here:
+		// http://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-transactions-v1.0-os.html#section-txn-discharge
+		switch state := ds.(type) {
+		case *encoding.StateRejected:
+			if state.Error != nil {
+				return nil, state.Error
+			}
+			return nil, fmt.Errorf("transaction rejected with no error")
+		case *encoding.StateDeclared:
+			return state.TransactionID, nil
+		default:
+			return nil, fmt.Errorf("invalid frame type %T returned when declaring transaction", state)
+		}
+	case <-s.l.done:
+		return nil, s.l.doneErr
+	case <-ctx.Done():
+		// TODO: want to check if I should be handling this at all.
+		return nil, ctx.Err()
+	}
+}
+
 // send is separated from Send so that the mutex unlock can be deferred without
 // locking the transfer confirmation that happens in Send.
 func (s *Sender) send(ctx context.Context, msg *Message, opts *SendOptions) (chan encoding.DeliveryState, error) {
@@ -97,6 +119,11 @@ func (s *Sender) send(ctx context.Context, msg *Message, opts *SendOptions) (cha
 		maxDeliveryTagLength   = 32
 		maxTransferFrameHeader = 66 // determined by calcMaxTransferFrameHeader
 	)
+
+	if err := s.isSenderDead(); err != nil {
+		return nil, err
+	}
+
 	if len(msg.DeliveryTag) > maxDeliveryTagLength {
 		return nil, &Error{
 			Condition:   ErrCondMessageSizeExceeded,
@@ -196,6 +223,18 @@ func (s *Sender) send(ctx context.Context, msg *Message, opts *SendOptions) (cha
 	return fr.Done, nil
 }
 
+func (s *Sender) isSenderDead() error {
+	// check if the link is dead.  while it's safe to call s.send
+	// in this case, this will avoid some allocations etc.
+	select {
+	case <-s.l.done:
+		return s.l.doneErr
+	default:
+		// link is still active
+		return nil
+	}
+}
+
 // Address returns the link's address.
 func (s *Sender) Address() string {
 	if s.l.target == nil {
@@ -213,6 +252,25 @@ func (s *Sender) Address() string {
 // that contains the context's error message.
 func (s *Sender) Close(ctx context.Context) error {
 	return s.l.closeLink(ctx)
+}
+
+func newTransactionSender(session *Session, opts *TransactionControllerOptions) (*Sender, error) {
+	l := newLink(session, encoding.RoleSender)
+
+	l.coordinatorTarget = &frames.CoordinatorTarget{}
+
+	l.source = new(frames.Source)
+	s := &Sender{
+		l: l,
+	}
+
+	if opts != nil {
+		for _, v := range opts.Capabilities {
+			l.coordinatorTarget.Capabilities = append(l.coordinatorTarget.Capabilities, encoding.Symbol(v))
+		}
+	}
+
+	return s, nil
 }
 
 // newSendingLink creates a new sending link and attaches it to the session
@@ -292,7 +350,10 @@ func (s *Sender) attach(ctx context.Context) error {
 		if pa.Target == nil {
 			pa.Target = new(frames.Target)
 		}
-		pa.Target.Dynamic = s.l.dynamicAddr
+
+		if target, ok := pa.Target.(*frames.Target); ok {
+			target.Dynamic = s.l.dynamicAddr
+		}
 	}, func(pa *frames.PerformAttach) {
 		if s.l.target == nil {
 			s.l.target = new(frames.Target)
@@ -300,7 +361,9 @@ func (s *Sender) attach(ctx context.Context) error {
 
 		// if dynamic address requested, copy assigned name to address
 		if s.l.dynamicAddr && pa.Target != nil {
-			s.l.target.Address = pa.Target.Address
+			if target, ok := pa.Target.(*frames.Target); ok {
+				s.l.target.Address = target.Address
+			}
 		}
 	}); err != nil {
 		return err

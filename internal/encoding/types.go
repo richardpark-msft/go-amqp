@@ -86,6 +86,12 @@ const (
 	TypeCodeTarget AMQPType = 0x29
 	TypeCodeError  AMQPType = 0x1d
 
+	// Transaction types
+	TypeCodeTransactionCoordinator AMQPType = 0x30
+	TypeCodeTransactionDeclare     AMQPType = 0x31
+	TypeCodeTransactionDischarge   AMQPType = 0x32
+	TypeCodeTransactionDeclared    AMQPType = 0x33
+
 	TypeCodeMessageHeader         AMQPType = 0x70
 	TypeCodeDeliveryAnnotations   AMQPType = 0x71
 	TypeCodeMessageAnnotations    AMQPType = 0x72
@@ -733,6 +739,28 @@ func (sm *StateModified) Unmarshal(r *buffer.Buffer) error {
 
 func (sm *StateModified) String() string {
 	return fmt.Sprintf("Modified{DeliveryFailed: %t, UndeliverableHere: %t, MessageAnnotations: %v}", sm.DeliveryFailed, sm.UndeliverableHere, sm.MessageAnnotations)
+}
+
+type StateDeclared struct {
+	TransactionID any
+}
+
+func (sr *StateDeclared) deliveryState() {}
+
+func (sm *StateDeclared) Marshal(wr *buffer.Buffer) error {
+	return MarshalComposite(wr, TypeCodeTransactionDeclare,
+		[]MarshalField{{Value: sm.TransactionID}},
+	)
+}
+
+func (sm *StateDeclared) Unmarshal(r *buffer.Buffer) error {
+	return UnmarshalComposite(r, TypeCodeTransactionDeclared,
+		UnmarshalField{Field: &sm.TransactionID},
+	)
+}
+
+func (sm *StateDeclared) String() string {
+	return fmt.Sprintf("Declared{TransactionID: %v}", sm.TransactionID)
 }
 
 // symbol is an AMQP symbolic string.

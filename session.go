@@ -277,6 +277,35 @@ func (s *Session) NewSender(ctx context.Context, target string, opts *SenderOpti
 	return newSenderForSession(ctx, s, target, opts, senderTestHooks{})
 }
 
+// NewTransactionController creates a transaction controller, which can declare
+// and dischage transactions for this connection.
+func (s *Session) NewTransactionController(ctx context.Context, opts *TransactionControllerOptions) (*TransactionController, error) {
+	return newTransactionControllerForSession(ctx, s, opts, senderTestHooks{})
+}
+
+func newTransactionControllerForSession(ctx context.Context, s *Session, opts *TransactionControllerOptions, hooks senderTestHooks) (*TransactionController, error) {
+	if opts == nil {
+		opts = &TransactionControllerOptions{}
+	}
+
+	sender, err := newTransactionSender(s, opts)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	if err = sender.attach(ctx); err != nil {
+		return nil, err
+	}
+
+	go sender.mux(hooks)
+
+	return &TransactionController{sender: sender}, nil
+}
+
 // split out so tests can add hooks
 func newSenderForSession(ctx context.Context, s *Session, target string, opts *SenderOptions, hooks senderTestHooks) (*Sender, error) {
 	l, err := newSender(target, s, opts)

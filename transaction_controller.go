@@ -2,30 +2,11 @@ package amqp
 
 import (
 	"context"
-	"fmt"
-
-	"github.com/Azure/go-amqp/internal/encoding"
 )
 
-type TransactionCoordinatorOptions struct {
+type TransactionControllerOptions struct {
 	// Capabilities is the list of extension capabilities the sender supports.
 	Capabilities []string
-}
-
-func newTransactionController(session *Session, opts *TransactionCoordinatorOptions) (*TransactionController, error) {
-	if opts == nil {
-		opts = &TransactionCoordinatorOptions{}
-	}
-
-	sender, err := newSender("", session, &SenderOptions{
-		Capabilities: opts.Capabilities,
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &TransactionController{sender: sender}, nil
 }
 
 // TransactionController can interact with the transaction coordinator
@@ -42,17 +23,11 @@ func (tc *TransactionController) Discharge(ctx context.Context, discharge Transa
 }
 
 func (tc *TransactionController) Declare(ctx context.Context, declare TransactionDeclare, opts *SendOptions) (any, error) {
-	deliveryState, err := tc.sender.sendEx(ctx, &Message{
+	return tc.sender.declareTransaction(ctx, &Message{
 		Value: declare,
 	}, opts)
+}
 
-	if err != nil {
-		return nil, err
-	}
-
-	if state, ok := deliveryState.(*encoding.StateDeclared); ok {
-		return state.TransactionID, nil
-	}
-
-	return nil, fmt.Errorf("unexpected delivery state %T when DECLAREing transaction", deliveryState)
+func (tc *TransactionController) Close(ctx context.Context) error {
+	return tc.sender.Close(ctx)
 }

@@ -49,10 +49,11 @@ type link struct {
 	doneErr  error         // contains the mux error state; ONLY written to by the mux and MUST only be read from after done is closed!
 	closeErr error         // contains the error state returned from closeLink(); ONLY closeLink() reads/writes this!
 
-	session    *Session                // parent session
-	source     *frames.Source          // used for Receiver links
-	target     *frames.Target          // used for Sender links
-	properties map[encoding.Symbol]any // additional properties sent upon link attach
+	session           *Session       // parent session
+	source            *frames.Source // used for Receiver links
+	target            *frames.Target // used for Sender links
+	coordinatorTarget *frames.CoordinatorTarget
+	properties        map[encoding.Symbol]any // additional properties sent upon link attach
 
 	// "The delivery-count is initialized by the sender when a link endpoint is created,
 	// and is incremented whenever a message is sent. Only the sender MAY independently
@@ -133,8 +134,14 @@ func (l *link) attach(ctx context.Context, beforeAttach func(*frames.PerformAtta
 		SenderSettleMode:   l.senderSettleMode,
 		MaxMessageSize:     l.maxMessageSize,
 		Source:             l.source,
-		Target:             l.target,
-		Properties:         l.properties,
+		//Target:             l.target,
+		Properties: l.properties,
+	}
+
+	if l.target != nil {
+		attach.Target = l.target
+	} else if l.coordinatorTarget != nil {
+		attach.Target = l.coordinatorTarget
 	}
 
 	// link-specific configuration of the attach frame
