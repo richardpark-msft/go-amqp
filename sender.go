@@ -22,6 +22,8 @@ type Sender struct {
 	buf             buffer.Buffer
 	nextDeliveryTag uint64
 	rollback        chan struct{}
+
+	targetAddress string // cached value for use with debug logging or Address()
 }
 
 // LinkName() is the name of the link used for this Sender.
@@ -60,17 +62,23 @@ type SendOptions struct {
 // additional messages can be sent while the current goroutine is waiting
 // for the confirmation.
 func (s *Sender) Send(ctx context.Context, msg *Message, opts *SendOptions) error {
+	_, err := s.sendRaw(ctx, msg, opts)
+	return err
+}
+
+// sendRaw sends the message and waits for and returns the resulting DeliveryState.
+func (s *Sender) sendRaw(ctx context.Context, msg *Message, opts *SendOptions) (encoding.DeliveryState, error) {
 	// check if the link is dead.  while it's safe to call s.send
 	// in this case, this will avoid some allocations etc.
 	select {
 	case <-s.l.done:
-		return s.l.doneErr
+		return nil, s.l.doneErr
 	default:
 		// link is still active
 	}
 	done, err := s.send(ctx, msg, opts)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// wait for transfer to be confirmed
@@ -78,16 +86,16 @@ func (s *Sender) Send(ctx context.Context, msg *Message, opts *SendOptions) erro
 	case state := <-done:
 		if state, ok := state.(*encoding.StateRejected); ok {
 			if state.Error != nil {
-				return state.Error
+				return nil, state.Error
 			}
-			return errors.New("the peer rejected the message without specifying an error")
+			return nil, errors.New("the peer rejected the message without specifying an error")
 		}
-		return nil
+		return state, nil
 	case <-s.l.done:
-		return s.l.doneErr
+		return nil, s.l.doneErr
 	case <-ctx.Done():
 		// TODO: if the message is not settled and we never received a disposition, how can we consider the message as sent?
-		return ctx.Err()
+		return nil, ctx.Err()
 	}
 }
 
@@ -148,6 +156,12 @@ func (s *Sender) send(ctx context.Context, msg *Message, opts *SendOptions) (cha
 		DeliveryTag:   deliveryTag,
 		MessageFormat: &msg.Format,
 		More:          s.buf.Len() > 0,
+	}
+
+	if msg.TransactionID != nil {
+		fr.State = &encoding.TransactionDeliveryState{
+			TransactionID: msg.TransactionID,
+		}
 	}
 
 	for fr.More {
@@ -215,7 +229,16 @@ func (s *Sender) Address() string {
 	if s.l.target == nil {
 		return ""
 	}
-	return s.l.target.Address
+
+	return s.targetAddress
+}
+
+func asTarget(v any) *frames.Target {
+	if target, ok := v.(*frames.Target); ok {
+		return target
+	}
+
+	return nil
 }
 
 // Close closes the Sender and AMQP link.
@@ -229,16 +252,35 @@ func (s *Sender) Close(ctx context.Context) error {
 	return s.l.closeLink(ctx)
 }
 
+// newTransactionControllerSender is a sender but specifically coordinating
+func newTransactionControllerSender(session *Session, opts *TransactionControllerOptions) (*Sender, error) {
+	l := newLink(session, encoding.RoleSender)
+
+	target := &frames.CoordinatorTarget{}
+
+	if opts != nil {
+		for _, sym := range opts.Capabilities {
+			target.Capabilities = append(target.Capabilities, encoding.Symbol(sym))
+		}
+	}
+
+	l.target = target
+	return &Sender{
+		l: l,
+	}, nil
+}
+
 // newSendingLink creates a new sending link and attaches it to the session
 func newSender(target string, session *Session, opts *SenderOptions) (*Sender, error) {
 	l := newLink(session, encoding.RoleSender)
-	l.target = &frames.Target{Address: target}
+
+	targetFrame := &frames.Target{Address: target}
+	l.target = targetFrame
 	l.source = new(frames.Source)
 	s := &Sender{
 		l:        l,
 		rollback: make(chan struct{}),
 	}
-
 	if opts == nil {
 		return s, nil
 	}
@@ -251,7 +293,8 @@ func newSender(target string, session *Session, opts *SenderOptions) (*Sender, e
 	}
 	s.l.source.Durable = opts.Durability
 	if opts.DynamicAddress {
-		s.l.target.Address = ""
+		targetFrame.Address = ""
+		s.targetAddress = ""
 		s.l.dynamicAddr = opts.DynamicAddress
 	}
 	if opts.ExpiryPolicy != "" {
@@ -287,16 +330,16 @@ func newSender(target string, session *Session, opts *SenderOptions) (*Sender, e
 	}
 	s.l.source.Address = opts.SourceAddress
 	for _, v := range opts.TargetCapabilities {
-		s.l.target.Capabilities = append(s.l.target.Capabilities, encoding.Symbol(v))
+		targetFrame.Capabilities = append(targetFrame.Capabilities, encoding.Symbol(v))
 	}
 	if opts.TargetDurability != DurabilityNone {
-		s.l.target.Durable = opts.TargetDurability
+		targetFrame.Durable = opts.TargetDurability
 	}
 	if opts.TargetExpiryPolicy != ExpiryPolicySessionEnd {
-		s.l.target.ExpiryPolicy = opts.TargetExpiryPolicy
+		targetFrame.ExpiryPolicy = opts.TargetExpiryPolicy
 	}
 	if opts.TargetExpiryTimeout != 0 {
-		s.l.target.Timeout = opts.TargetExpiryTimeout
+		targetFrame.Timeout = opts.TargetExpiryTimeout
 	}
 	return s, nil
 }
@@ -307,15 +350,24 @@ func (s *Sender) attach(ctx context.Context) error {
 		if pa.Target == nil {
 			pa.Target = new(frames.Target)
 		}
-		pa.Target.Dynamic = s.l.dynamicAddr
+
+		if target := asTarget(pa.Target); target != nil {
+			target.Dynamic = s.l.dynamicAddr
+		}
 	}, func(pa *frames.PerformAttach) {
 		if s.l.target == nil {
 			s.l.target = new(frames.Target)
 		}
 
 		// if dynamic address requested, copy assigned name to address
-		if s.l.dynamicAddr && pa.Target != nil {
-			s.l.target.Address = pa.Target.Address
+		linkTarget := asTarget(s.l.target)
+		attachFrameTarget := asTarget(pa.Target)
+
+		if linkTarget != nil && attachFrameTarget != nil {
+			if s.l.dynamicAddr {
+				linkTarget.Address = attachFrameTarget.Address
+				s.targetAddress = attachFrameTarget.Address
+			}
 		}
 	}); err != nil {
 		return err
@@ -346,11 +398,12 @@ func (s *Sender) mux(hooks senderTestHooks) {
 Loop:
 	for {
 		var outgoingTransfers chan transferEnvelope
+
 		if s.l.linkCredit > 0 {
-			debug.Log(1, "TX (Sender %p) (enable): target: %q, link credit: %d, deliveryCount: %d", s, s.l.target.Address, s.l.linkCredit, s.l.deliveryCount)
+			debug.Log(1, "TX (Sender %p) (enable): target: %q, link credit: %d, deliveryCount: %d", s, s.targetAddress, s.l.linkCredit, s.l.deliveryCount)
 			outgoingTransfers = s.transfers
 		} else {
-			debug.Log(1, "TX (Sender %p) (pause): target: %q, link credit: %d, deliveryCount: %d", s, s.l.target.Address, s.l.linkCredit, s.l.deliveryCount)
+			debug.Log(1, "TX (Sender %p) (pause): target: %q, link credit: %d, deliveryCount: %d", s, s.targetAddress, s.l.linkCredit, s.l.deliveryCount)
 		}
 
 		closed := s.l.close

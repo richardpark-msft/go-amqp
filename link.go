@@ -49,9 +49,14 @@ type link struct {
 	doneErr  error         // contains the mux error state; ONLY written to by the mux and MUST only be read from after done is closed!
 	closeErr error         // contains the error state returned from closeLink(); ONLY closeLink() reads/writes this!
 
-	session    *Session                // parent session
-	source     *frames.Source          // used for Receiver links
-	target     *frames.Target          // used for Sender links
+	session *Session       // parent session
+	source  *frames.Source // used for Receiver links
+
+	// target is of type:
+	// - *[frames.Target] - for typical Senders
+	// - *[frames.CoordinatorTarget] - for TransactionControllers
+	target any // used for Sender links
+
 	properties map[encoding.Symbol]any // additional properties sent upon link attach
 
 	// "The delivery-count is initialized by the sender when a link endpoint is created,
