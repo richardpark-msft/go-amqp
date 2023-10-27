@@ -26,6 +26,10 @@ type DischargeOptions struct {
 	// placeholder for future optional parameters
 }
 
+// Discharge discharges a transaction, either committing it or rolling it back based on
+// the values set in the discharge parameter.
+//
+// Spec: http://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-transactions-v1.0-os.html#type-discharge
 func (tc *TransactionController) Discharge(ctx context.Context, discharge TransactionDischarge, opts *DischargeOptions) error {
 	return tc.sender.Send(ctx, &Message{
 		Value: discharge,
@@ -37,6 +41,10 @@ type DeclareOptions struct {
 	// placeholder for future optional parameters
 }
 
+// Declare declares a transaction.
+// Returns a transaction ID, if successful, or an error otherwise.
+//
+// Spec: http://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-transactions-v1.0-os.html#section-txn-declare
 func (tc *TransactionController) Declare(ctx context.Context, declare TransactionDeclare, opts *DeclareOptions) (any, error) {
 	state, err := tc.sender.sendRaw(ctx, &Message{
 		Value: declare,
