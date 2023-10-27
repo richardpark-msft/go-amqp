@@ -190,6 +190,10 @@ func TestTransactionImplicitRollback(t *testing.T) {
 
 	// check that it's clean.
 	clients = mustCreateClients()
+
+	messages, err := receiveEvents(clients.Session, clients.QueueName)
+	require.NoError(t, err)
+	require.Empty(t, messages)
 }
 
 func TestTransactionTimeout(t *testing.T) {
@@ -249,8 +253,8 @@ func TestTransactionTimeout(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestNestedTransactionControllers(t *testing.T) {
-	panic("Not implemented yet, but I expect this test to fail")
+func TestMultipleTransactionControllers(t *testing.T) {
+
 }
 
 func TestTransactionPeekThroughTransaction(t *testing.T) {
@@ -343,7 +347,7 @@ func mustCreateClients() clients {
 
 func receiveEvents(session *amqp.Session, queueName string) ([]*amqp.Message, error) {
 	receiver, err := session.NewReceiver(context.Background(), queueName, &amqp.ReceiverOptions{
-		Credit:         100,
+		Credit:         1000,
 		SettlementMode: amqp.ReceiverSettleModeFirst.Ptr(),
 	})
 
