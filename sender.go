@@ -278,9 +278,11 @@ func newSender(target string, session *Session, opts *SenderOptions) (*Sender, e
 	l.target = targetFrame
 	l.source = new(frames.Source)
 	s := &Sender{
-		l:        l,
-		rollback: make(chan struct{}),
+		l:             l,
+		rollback:      make(chan struct{}),
+		targetAddress: target,
 	}
+
 	if opts == nil {
 		return s, nil
 	}
