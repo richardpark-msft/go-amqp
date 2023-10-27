@@ -7,6 +7,7 @@ import (
 	"github.com/Azure/go-amqp/internal/encoding"
 )
 
+// TransactionControllerOptions contains the optional settings for configuring a [TransactionController].
 type TransactionControllerOptions struct {
 	// Capabilities is the list of extension capabilities the sender supports.
 	Capabilities []string
@@ -26,8 +27,6 @@ type DischargeOptions struct {
 }
 
 func (tc *TransactionController) Discharge(ctx context.Context, discharge TransactionDischarge, opts *DischargeOptions) error {
-	var sendOptions *SendOptions
-
 	return tc.sender.Send(ctx, &Message{
 		Value: discharge,
 	}, nil)
@@ -56,6 +55,7 @@ func (tc *TransactionController) Declare(ctx context.Context, declare Transactio
 	return declared.TransactionID, nil
 }
 
+// Close closes the AMQP link for this transaction controller.
 func (tc *TransactionController) Close(ctx context.Context) error {
 	return tc.sender.Close(ctx)
 }
