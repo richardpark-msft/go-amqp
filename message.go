@@ -101,7 +101,7 @@ type Message struct {
 	// encryption details).
 	Footer Annotations
 
-	// TransactionID can be used by senders to ensur a message is included as part of a transaction, started with
+	// TransactionID can be used by senders to ensure a message is included as part of a transaction, started with
 	// [TransactionController.Declare].
 	TransactionID any
 
