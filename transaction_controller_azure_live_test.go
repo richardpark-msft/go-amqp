@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,15 +16,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var initTest func(t *testing.T)
+var liveTestCheck = func(t *testing.T) {}
 
 func init() {
-	if err := godotenv.Load(); err != nil {
-		// disable the tests.
-		initTest = func(t *testing.T) {
-			t.Skipf("Skipping live tests, .env file not setup")
+	_, err := newTestVars()
+
+	if err != nil {
+		fmt.Printf("Errors loading test vars, live tests will be disabled: %s", err)
+
+		liveTestCheck = func(t *testing.T) {
+			t.Skipf("Live tests are disabled, environment not defined")
 		}
+		return
 	}
+
+	// t.Skipf("Skipping live tests, .env file not setup")
 
 	// purge the queue before all the tests start.
 	testClients := mustCreateClients()
@@ -47,6 +54,8 @@ func init() {
 }
 
 func TestDeclareController(t *testing.T) {
+	liveTestCheck(t)
+
 	clients := mustCreateClients()
 
 	defer func() {
@@ -71,6 +80,8 @@ func TestDeclareController(t *testing.T) {
 }
 
 func TestDeclareAndDischarge(t *testing.T) {
+	liveTestCheck(t)
+
 	clients := mustCreateClients()
 
 	defer func() {
@@ -95,6 +106,8 @@ func TestDeclareAndDischarge(t *testing.T) {
 }
 
 func TestNormalDeclareAndDischarge(t *testing.T) {
+	liveTestCheck(t)
+
 	clients := mustCreateClients()
 
 	defer func() {
@@ -119,6 +132,8 @@ func TestNormalDeclareAndDischarge(t *testing.T) {
 }
 
 func TestDischargingWithInvalidID(t *testing.T) {
+	liveTestCheck(t)
+
 	clients := mustCreateClients()
 
 	defer func() {
@@ -139,6 +154,8 @@ func TestDischargingWithInvalidID(t *testing.T) {
 }
 
 func TestDeclareWithGlobalID(t *testing.T) {
+	liveTestCheck(t)
+
 	clients := mustCreateClients()
 
 	defer func() {
@@ -157,6 +174,8 @@ func TestDeclareWithGlobalID(t *testing.T) {
 // TestTransactionImplicitRollback checks that if you just close your link involved in the transaction
 // that the default is to rollback.
 func TestTransactionImplicitRollback(t *testing.T) {
+	liveTestCheck(t)
+
 	clients := mustCreateClients()
 
 	defer func() {
@@ -184,6 +203,8 @@ func TestTransactionImplicitRollback(t *testing.T) {
 }
 
 func TestTransactionTimeout(t *testing.T) {
+	liveTestCheck(t)
+
 	clients := mustCreateClients()
 
 	defer func() {
@@ -238,6 +259,8 @@ func TestTransactionTimeout(t *testing.T) {
 }
 
 func TestTransactionsFromSeparateConnectionsAreIndependent(t *testing.T) {
+	liveTestCheck(t)
+
 	clients1 := mustCreateClients()
 
 	t.Cleanup(func() {
@@ -268,6 +291,8 @@ func TestTransactionsFromSeparateConnectionsAreIndependent(t *testing.T) {
 }
 
 func TestMultipleActiveTransactions(t *testing.T) {
+	liveTestCheck(t)
+
 	clients := mustCreateClients()
 
 	t.Cleanup(func() {
@@ -329,11 +354,47 @@ type clients struct {
 	QueueName string
 }
 
+type testVars struct {
+	Endpoint  string
+	User      string
+	Password  string
+	QueueName string
+}
+
+func newTestVars() (testVars, error) {
+	if err := godotenv.Load(); err != nil {
+		return testVars{}, err
+	}
+
+	var missing []string
+
+	getEnv := func(ev string) string {
+		v := os.Getenv(ev)
+		if v == "" {
+			missing = append(missing, ev)
+		}
+		return v
+	}
+
+	tv := testVars{
+		Endpoint:  getEnv("AMQP_ENDPOINT"), // ex: amqps://<your-service-bus-instance>.servicebus.windows.net
+		User:      getEnv("AMQP_USER"),     // ex: RootManageSharedAccessKey
+		Password:  getEnv("AMQP_PASSWORD"), // the key value
+		QueueName: getEnv("AMQP_QUEUE"),    // ex: demo
+	}
+
+	if tv.Endpoint == "" || tv.User == "" || tv.Password == "" || tv.QueueName == "" {
+		return testVars{}, fmt.Errorf("Missing environment variables: %s", strings.Join(missing, ","))
+	}
+
+	return tv, nil
+}
+
 func mustCreateClients() clients {
 	getEnv := func(ev string) string {
 		v := os.Getenv(ev)
 		if v == "" {
-			log.Fatalf("%s is defined in environment", ev)
+			log.Fatalf("%s is NOT defined in environment", ev)
 		}
 		return v
 	}
