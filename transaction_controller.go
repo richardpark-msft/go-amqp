@@ -19,16 +19,29 @@ type TransactionController struct {
 	sender *Sender
 }
 
-func (tc *TransactionController) Discharge(ctx context.Context, discharge TransactionDischarge, opts *SendOptions) error {
-	return tc.sender.Send(ctx, &Message{
-		Value: discharge,
-	}, opts)
+// DischargeOptions contains the optional parameters for the [TransactionController.Discharge] method.
+// DischargeOptions contains the optional parameters for the [Client.Discharge] method.
+type DischargeOptions struct {
+	// placeholder for future optional parameters
 }
 
-func (tc *TransactionController) Declare(ctx context.Context, declare TransactionDeclare, opts *SendOptions) (any, error) {
+func (tc *TransactionController) Discharge(ctx context.Context, discharge TransactionDischarge, opts *DischargeOptions) error {
+	var sendOptions *SendOptions
+
+	return tc.sender.Send(ctx, &Message{
+		Value: discharge,
+	}, nil)
+}
+
+// DeclareOptions contains the optional parameters for the [Client.Declare] method.
+type DeclareOptions struct {
+	// placeholder for future optional parameters
+}
+
+func (tc *TransactionController) Declare(ctx context.Context, declare TransactionDeclare, opts *DeclareOptions) (any, error) {
 	state, err := tc.sender.sendRaw(ctx, &Message{
 		Value: declare,
-	}, opts)
+	}, nil)
 
 	if err != nil {
 		return nil, err
