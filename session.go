@@ -299,7 +299,7 @@ func newSenderForSession(ctx context.Context, s *Session, target string, opts *S
 }
 
 // NewTransactionController creates a transaction controller, which can declare
-// and dischage transactions for this connection.
+// and discharge transactions.
 func (s *Session) NewTransactionController(ctx context.Context, opts *TransactionControllerOptions) (*TransactionController, error) {
 	return newTransactionControllerForSession(ctx, s, opts, senderTestHooks{})
 }
