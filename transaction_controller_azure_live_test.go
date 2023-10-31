@@ -42,7 +42,9 @@ func init() {
 	}()
 
 	// purge all the old messages
-	msgs, err := receiveEvents(testClients)
+	msgs, err := receiveEvents(context.Background(), testClients, &receiveEventsOptions{
+		MaxWaitForMessage: 10 * time.Second,
+	})
 
 	if err != nil {
 		panic(err)
@@ -165,7 +167,7 @@ func TestDeclareWithGlobalID(t *testing.T) {
 
 	transactionID, err := clients.TC.Declare(context.Background(), amqp.TransactionDeclare{
 		// this was just ignored by Service Bus...
-		GlobalID: "some global ID",
+		GlobalID: []byte("some global ID"),
 	}, nil)
 	require.NoError(t, err)
 	require.NotNil(t, transactionID)
@@ -197,7 +199,7 @@ func TestTransactionImplicitRollback(t *testing.T) {
 	// check that it's clean.
 	clients = mustCreateClients()
 
-	messages, err := receiveEvents(clients)
+	messages, err := receiveEvents(context.Background(), clients, nil)
 	require.NoError(t, err)
 	require.Empty(t, messages)
 }
@@ -209,6 +211,12 @@ func TestTransactionTimeout(t *testing.T) {
 
 	defer func() {
 		err := clients.Cleanup()
+		require.NoError(t, err)
+	}()
+
+	defer func() {
+		// purge all the excess events.
+		_, err := receiveEvents(context.Background(), clients, nil)
 		require.NoError(t, err)
 	}()
 
@@ -230,24 +238,27 @@ func TestTransactionTimeout(t *testing.T) {
 	// > The transaction timer starts when the first operation in the transaction starts.
 	start := time.Now()
 
-	// we can't be totally idle...
-	backgroundCtx, cancelBackground := context.WithDeadline(context.Background(), start.Add(2*time.Minute+30*time.Second))
-	defer cancelBackground()
+	// We can't be totally idle or else they'll shut down the connection.
+	// We want it to be alive, with the transaction just sitting there un-discharged.
+	{
+		ctx, cancel := context.WithDeadline(context.Background(), start.Add(2*time.Minute+30*time.Second))
+		defer cancel()
 
-	go func() {
-		for {
-			select {
-			case <-backgroundCtx.Done():
-			default:
-				err = sendTestMessage(t, clients, &amqp.Message{Value: "hello"})
-				require.NoError(t, err)
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+				default:
+					err = sendTestMessage(t, clients, &amqp.Message{Value: "hello"})
+					require.NoError(t, err)
 
-				time.Sleep(time.Second)
+					time.Sleep(time.Minute)
+				}
 			}
-		}
-	}()
+		}()
 
-	<-backgroundCtx.Done()
+		<-ctx.Done()
+	}
 
 	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -300,49 +311,57 @@ func TestMultipleActiveTransactions(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	now := time.Now().UnixNano()
+	firstMsgValue := fmt.Sprintf("first transaction: %d", now)
+	secondMsgValue := fmt.Sprintf("second transaction: %d", now)
+
 	// multiple transactions can be active simultaneously.
+
+	// this first transaction will be completed before the second transaction (which we're about to also
+	// create).
 	firstTransID, err := clients.TC.Declare(context.Background(), amqp.TransactionDeclare{}, nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, firstTransID)
-
-	err = sendTestMessage(t, clients, &amqp.Message{Value: "first transaction", TransactionID: firstTransID})
-	require.NoError(t, err)
 
 	secondTransID, err := clients.TC.Declare(context.Background(), amqp.TransactionDeclare{}, nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, secondTransID)
 
-	err = sendTestMessage(t, clients, &amqp.Message{Value: "second transaction", TransactionID: secondTransID})
+	// send a message to each transaction - so now we have pending work in both, simultaneously.
+	err = sendTestMessage(t, clients, &amqp.Message{Value: firstMsgValue, TransactionID: firstTransID})
+	require.NoError(t, err)
+
+	err = sendTestMessage(t, clients, &amqp.Message{Value: secondMsgValue, TransactionID: secondTransID})
 	require.NoError(t, err)
 
 	{
-		// commit the initial transaction willCommitFirstTransID
+		// now we'll commit the first transaction. The second transaction remains uncommitted.
 		err = clients.TC.Discharge(context.Background(), amqp.TransactionDischarge{
 			TransactionID: firstTransID,
 		}, nil)
 		require.NoError(t, err)
 
-		messages, err := receiveEvents(clients)
+		// and now the message is available.
+		messages, err := receiveEvents(context.Background(), clients, nil)
 		require.NoError(t, err)
 		require.Equal(t, 1, len(messages))
 
 		// we get the message from our first transaction
-		require.Equal(t, "first transaction", messages[0].Value)
+		require.Equal(t, firstMsgValue, messages[0].Value)
 	}
 
 	{
-		// now we'll do the second one, which we started before the previous transaction
-		// completed. The two transactions are completely independent.
+		// now we'll commit the second transaction, and validate that it's event is still available.
 		err = clients.TC.Discharge(context.Background(), amqp.TransactionDischarge{
 			TransactionID: secondTransID,
 		}, nil)
 		require.NoError(t, err)
 
-		messages, err := receiveEvents(clients)
+		messages, err := receiveEvents(context.Background(), clients, nil)
 		require.NoError(t, err)
 		require.Equal(t, 1, len(messages))
 
-		require.Equal(t, "second transaction", messages[0].Value)
+		require.Equal(t, secondMsgValue, messages[0].Value)
 	}
 }
 
@@ -466,7 +485,19 @@ func mustCreateClients() clients {
 	}
 }
 
-func receiveEvents(clients clients) ([]*amqp.Message, error) {
+type receiveEventsOptions struct {
+	MaxWaitForMessage time.Duration
+}
+
+func receiveEvents(ctx context.Context, clients clients, opts *receiveEventsOptions) ([]*amqp.Message, error) {
+	if opts == nil {
+		opts = &receiveEventsOptions{}
+	}
+
+	if opts.MaxWaitForMessage == 0 {
+		opts.MaxWaitForMessage = 5 * time.Second
+	}
+
 	session, err := clients.Conn.NewSession(context.Background(), nil)
 
 	if err != nil {
@@ -483,7 +514,7 @@ func receiveEvents(clients clients) ([]*amqp.Message, error) {
 
 	receiver, err := session.NewReceiver(context.Background(), clients.QueueName, &amqp.ReceiverOptions{
 		Credit:         1000,
-		SettlementMode: amqp.ReceiverSettleModeFirst.Ptr(),
+		SettlementMode: amqp.ReceiverSettleModeSecond.Ptr(),
 	})
 
 	if err != nil {
@@ -493,13 +524,17 @@ func receiveEvents(clients clients) ([]*amqp.Message, error) {
 	var msgs []*amqp.Message
 
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, opts.MaxWaitForMessage)
 		msg, err := receiver.Receive(ctx, nil)
 		cancel()
 
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			// probably empty
 			break
+		}
+
+		if err := receiver.AcceptMessage(context.Background(), msg); err != nil {
+			return nil, err
 		}
 
 		msgs = append(msgs, msg)

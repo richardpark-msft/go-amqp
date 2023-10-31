@@ -25,7 +25,7 @@ const (
 // TransactionDeclare contains values within the Declare message.
 type TransactionDeclare struct {
 	// Maps to the global-id field of the Declare message.
-	GlobalID any
+	GlobalID []byte
 }
 
 func (t TransactionDeclare) Marshal(wr *buffer.Buffer) error {
@@ -36,7 +36,8 @@ func (t TransactionDeclare) Marshal(wr *buffer.Buffer) error {
 }
 
 type TransactionDischarge struct {
-	TransactionID any
+	TransactionID []byte
+
 	// Fail indicates that the work associated with this transaction has failed, and the controller
 	// wishes the transaction to be rolled back. If the transaction is associated with a global-id
 	// this will render the global transaction rollback-only. If the transaction is a local transaction,

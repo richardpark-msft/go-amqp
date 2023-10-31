@@ -718,7 +718,7 @@ func (sr *StateReleased) String() string {
 
 type StateDeclared struct {
 	// TransactionID is the allocated transaction ID from the transaction coordinator.
-	TransactionID any
+	TransactionID []byte
 }
 
 func (sd *StateDeclared) deliveryState() {}

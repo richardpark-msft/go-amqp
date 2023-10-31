@@ -45,7 +45,7 @@ type DeclareOptions struct {
 // Returns a transaction ID, if successful, or an error otherwise.
 //
 // Spec: http://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-transactions-v1.0-os.html#section-txn-declare
-func (tc *TransactionController) Declare(ctx context.Context, declare TransactionDeclare, opts *DeclareOptions) (any, error) {
+func (tc *TransactionController) Declare(ctx context.Context, declare TransactionDeclare, opts *DeclareOptions) ([]byte, error) {
 	state, err := tc.sender.sendRaw(ctx, &Message{
 		Value: declare,
 	}, nil)
