@@ -259,8 +259,24 @@ func newTransactionControllerSender(session *Session, opts *TransactionControlle
 	target := &frames.CoordinatorTarget{}
 
 	if opts != nil {
-		for _, sym := range opts.Capabilities {
-			target.Capabilities = append(target.Capabilities, encoding.Symbol(sym))
+		if opts.LocalTransactions {
+			target.Capabilities = append(target.Capabilities, encoding.Symbol("amqp:local-transactions"))
+		}
+
+		if opts.DistributedTransactions {
+			target.Capabilities = append(target.Capabilities, encoding.Symbol("amqp:distributed-transactions"))
+		}
+
+		if opts.PromotableTransactions {
+			target.Capabilities = append(target.Capabilities, encoding.Symbol("amqp:promotable-transactions"))
+		}
+
+		if opts.MultipleTransactionsPerSession {
+			target.Capabilities = append(target.Capabilities, encoding.Symbol("amqp:multi-txns-per-ssn"))
+		}
+
+		if opts.MultiSessionsPerTransaction {
+			target.Capabilities = append(target.Capabilities, encoding.Symbol("amqp:multi-ssns-per-txn"))
 		}
 	}
 

@@ -9,8 +9,25 @@ import (
 
 // TransactionControllerOptions contains the optional settings for configuring a [TransactionController].
 type TransactionControllerOptions struct {
-	// Capabilities is the list of extension capabilities the sender supports.
-	Capabilities []string
+	// LocalTransactions requests support for local transactions.
+	// Corresponds to the `amqp:local-transactions` txn-capability.
+	LocalTransactions bool
+
+	// DistributedTransactions requests support for AMQP Distributed Transactions.
+	// Corresponds to the `amqp:distributed-transactions` txn-capability.
+	DistributedTransactions bool
+
+	// PromotableTransactions requests support for AMQP Promotable Transactions.
+	// Corresponds to the `amqp:promotable-transactions` txn-capability.
+	PromotableTransactions bool
+
+	// MultipleTransactionsPerSession requests support for multiple active transactions on a single session.
+	// Corresponds to the `amqp:multi-txns-per-ssn` txn-capability.
+	MultipleTransactionsPerSession bool
+
+	// MultiSessionsPerTransaction requests support for transactions whose txn-id is used across sessions on one connection.
+	// Corresponds to the `amqp:multi-ssns-per-txn` txn-capability.
+	MultiSessionsPerTransaction bool
 }
 
 // TransactionController can interact with the transaction coordinator

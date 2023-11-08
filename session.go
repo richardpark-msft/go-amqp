@@ -305,10 +305,6 @@ func (s *Session) NewTransactionController(ctx context.Context, opts *Transactio
 }
 
 func newTransactionControllerForSession(ctx context.Context, s *Session, opts *TransactionControllerOptions, hooks senderTestHooks) (*TransactionController, error) {
-	if opts == nil {
-		opts = &TransactionControllerOptions{}
-	}
-
 	sender, err := newTransactionControllerSender(s, opts)
 
 	if err != nil {
