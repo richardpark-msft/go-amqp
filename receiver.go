@@ -462,7 +462,7 @@ func (r *Receiver) attach(ctx context.Context) error {
 			pa.Source = new(frames.Source)
 		}
 		pa.Source.Dynamic = r.l.dynamicAddr
-	}, func(pa *frames.PerformAttach) {
+	}, func(pa *frames.PerformAttach) *Error {
 		if r.l.source == nil {
 			r.l.source = new(frames.Source)
 		}
@@ -477,6 +477,7 @@ func (r *Receiver) attach(ctx context.Context) error {
 		if pa.Source != nil {
 			r.l.source.Filter = pa.Source.Filter
 		}
+		return nil
 	}); err != nil {
 		return err
 	}

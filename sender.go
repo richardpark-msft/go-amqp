@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/Azure/go-amqp/internal/buffer"
@@ -372,7 +374,7 @@ func (s *Sender) attach(ctx context.Context) error {
 		if target := asTarget(pa.Target); target != nil {
 			target.Dynamic = s.l.dynamicAddr
 		}
-	}, func(pa *frames.PerformAttach) {
+	}, func(pa *frames.PerformAttach) *Error {
 		if s.l.target == nil {
 			s.l.target = new(frames.Target)
 		}
@@ -387,6 +389,8 @@ func (s *Sender) attach(ctx context.Context) error {
 				s.targetAddress = attachFrameTarget.Address
 			}
 		}
+
+		return s.checkCapabilities(pa)
 	}); err != nil {
 		return err
 	}
@@ -399,6 +403,43 @@ func (s *Sender) attach(ctx context.Context) error {
 type senderTestHooks struct {
 	MuxSelect   func()
 	MuxTransfer func()
+}
+
+func (s *Sender) checkCapabilities(pa *frames.PerformAttach) *Error {
+	ct, ok := s.l.target.(*frames.CoordinatorTarget)
+
+	if !ok {
+		// we're not required to check capabilities for non-transactioncontrollers.
+		return nil
+	}
+
+	// check that the capabilities match up with what we asked for
+	// NOTE: these lists are extremely short and (from the spec) the peer could return
+	// more than what we asked for.
+	missing := []string{}
+
+Loop:
+	for _, desCap := range ct.Capabilities {
+		for _, actualCap := range pa.OfferedCapabilities {
+			if desCap == actualCap {
+				continue Loop
+			}
+		}
+
+		missing = append(missing, string(desCap))
+	}
+
+	if len(missing) > 0 {
+		sort.Strings(missing)
+
+		// capabilities we needed weren't present
+		return &Error{
+			Condition:   ErrCondPreconditionFailed,
+			Description: fmt.Sprintf("Transaction coordinator did not support all desired capabilities: %s", strings.Join(missing, ",")),
+		}
+	}
+
+	return nil
 }
 
 func (s *Sender) mux(hooks senderTestHooks) {

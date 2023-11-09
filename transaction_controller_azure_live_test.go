@@ -90,6 +90,30 @@ func TestTransactionControllerDeclare(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestTransactionControllerDeclareWithUnsupportedCapabilities(t *testing.T) {
+	liveTestCheck(t)
+
+	clients := mustCreateClients()
+
+	defer func() {
+		err := clients.Cleanup()
+		require.NoError(t, err)
+	}()
+
+	tc, err := clients.Session.NewTransactionController(context.Background(), &amqp.TransactionControllerOptions{
+		MultiSessionsPerTransaction:    true,
+		MultipleTransactionsPerSession: true,
+		LocalTransactions:              true,
+		DistributedTransactions:        true,
+		PromotableTransactions:         true,
+	})
+	require.Nil(t, tc)
+	var amqpErr *amqp.Error
+	require.ErrorAs(t, err, &amqpErr)
+	require.Equal(t, amqp.ErrCondPreconditionFailed, amqpErr.Condition)
+	require.Equal(t, "Transaction coordinator did not support all desired capabilities: amqp:distributed-transactions,amqp:promotable-transactions", amqpErr.Description)
+}
+
 func TestTransactionControllerDeclareAndDischargeNoMessages(t *testing.T) {
 	liveTestCheck(t)
 

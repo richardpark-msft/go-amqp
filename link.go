@@ -121,7 +121,7 @@ func (l *link) waitForFrame(ctx context.Context) (frames.FrameBody, error) {
 
 // attach sends the Attach performative to establish the link with its parent session.
 // this is automatically called by the new*Link constructors.
-func (l *link) attach(ctx context.Context, beforeAttach func(*frames.PerformAttach), afterAttach func(*frames.PerformAttach)) error {
+func (l *link) attach(ctx context.Context, beforeAttach func(*frames.PerformAttach), afterAttach func(*frames.PerformAttach) *Error) error {
 	if err := l.session.freeAbandonedLinks(ctx); err != nil {
 		return err
 	}
@@ -212,7 +212,17 @@ func (l *link) attach(ctx context.Context, beforeAttach func(*frames.PerformAtta
 	}
 
 	// link-specific configuration post attach
-	afterAttach(resp)
+	if err := afterAttach(resp); err != nil {
+		dr := &frames.PerformDetach{
+			Handle: l.outputHandle,
+			Closed: true,
+			Error:  err,
+		}
+		if err := l.txFrameAndWait(ctx, dr); err != nil {
+			return err
+		}
+		return err
+	}
 
 	if err := l.setSettleModes(resp); err != nil {
 		// close the link as there's a mismatch on requested/supported settlement modes
