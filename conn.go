@@ -406,6 +406,13 @@ func (c *Conn) startImpl(ctx context.Context) error {
 }
 
 // Close closes the connection.
+//
+// Returns nil if there were no errors during shutdown,
+// or a *ConnError. This error is not actionable and is
+// purely for diagnostic purposes.
+//
+// The error returned by subsequent calls to Close is
+// idempotent, so the same value will always be returned.
 func (c *Conn) Close() error {
 	c.close()
 
@@ -415,15 +422,32 @@ func (c *Conn) Close() error {
 	<-c.txDone
 	<-c.rxDone
 
-	var connErr *ConnError
-	if errors.As(c.doneErr, &connErr) && connErr.RemoteErr == nil && connErr.inner == nil {
-		// an empty ConnectionError means the connection was closed by the caller
+	return c.closedErr()
+}
+
+// Done returns a channel that's closed when Conn is closed.
+func (c *Conn) Done() <-chan struct{} {
+	return c.done
+}
+
+// If Done is not yet closed, Err returns nil.
+// If Done is closed, Err returns nil or a *ConnError explaining why.
+// A nil error indicates that [Close] was called and there
+// were no errors during shutdown.
+//
+// A *ConnError indicates one of three things
+//   - there was an error during shutdown from a client-side call to [Close]. the
+//     error is not actionable and is purely for diagnostic purposes.
+//   - a fatal error was encountered that caused [Conn] to close
+//   - the peer closed the connection. [ConnError.RemoteErr] MAY contain an error
+//     from the peer indicating why it closed the connection
+func (c *Conn) Err() error {
+	select {
+	case <-c.done:
+		return c.closedErr()
+	default:
 		return nil
 	}
-
-	// there was an error during shut-down or connReader/connWriter
-	// experienced a terminal error
-	return c.doneErr
 }
 
 // close is called once, either from Close() or when connReader/connWriter exits
@@ -469,6 +493,20 @@ func (c *Conn) closeDuringStart() {
 	c.closeOnce.Do(func() {
 		c.net.Close()
 	})
+}
+
+// returns the error indicating why Conn has closed
+// NOTE: only call this AFTER Conn.done has been closed!
+func (c *Conn) closedErr() error {
+	// an empty ConnError means the connection was closed by the caller
+	var connErr *ConnError
+	if errors.As(c.doneErr, &connErr) && connErr.RemoteErr == nil && connErr.inner == nil {
+		return nil
+	}
+
+	// there was an error during shut-down or connReader/connWriter
+	// experienced a terminal error
+	return c.doneErr
 }
 
 // NewSession starts a new session on the connection.

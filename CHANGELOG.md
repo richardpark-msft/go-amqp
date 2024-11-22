@@ -1,5 +1,13 @@
 # Release History
 
+## 1.3.0 (unreleased)
+
+### Features Added
+
+* Added methods `Done` and `Err` to `Conn`
+  * `Done` returns a channel that's closed when `Conn` has closed.
+  * `Err` explains why `Conn` was closed.
+
 ## 1.2.0 (2024-09-30)
 
 ### Features Added
@@ -9,7 +17,7 @@
 
 ### Bugs Fixed
 
-* Fixed a rare race in `Conn.start` that could cause goroutines to be leaked if the provided context was canceld/expired.
+* Fixed a rare race in `Conn.start` that could cause goroutines to be leaked if the provided context was canceled/expired.
 
 ### Other Changes
 
