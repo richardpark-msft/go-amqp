@@ -7,6 +7,7 @@
 * Added methods `Done` and `Err` to `Conn`
   * `Done` returns a channel that's closed when `Conn` has closed.
   * `Err` explains why `Conn` was closed.
+* encoding.Symbol was exposed as a public type `Symbol`.
 
 ## 1.2.0 (2024-09-30)
 
