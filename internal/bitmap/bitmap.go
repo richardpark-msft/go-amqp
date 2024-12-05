@@ -11,7 +11,15 @@ type Bitmap struct {
 }
 
 func New(max uint32) *Bitmap {
-	return &Bitmap{max: max}
+	b := &Bitmap{
+		max: max,
+	}
+
+	for i := 0; i < 200; i++ {
+		b.Next()
+	}
+
+	return b
 }
 
 // add sets n in the bitmap.

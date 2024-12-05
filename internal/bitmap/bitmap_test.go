@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strconv"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestBitmap(t *testing.T) {
@@ -171,6 +173,18 @@ func TestBitmap_Sequence(t *testing.T) {
 	if want := uint32(max + 1); want != count {
 		t.Errorf("expected count() to be %d, but it was %d", want, count)
 	}
+}
+
+func TestBitmap_AddRemove(t *testing.T) {
+	const max = 1024
+	bm := New(max)
+
+	bm.Add(0)
+	bm.Add(1)
+
+	v, full := bm.Next()
+	require.False(t, full)
+	require.Equal(t, 2, v)
 }
 
 func countBitmap(bm *Bitmap) uint32 {
