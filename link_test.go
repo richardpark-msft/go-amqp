@@ -28,7 +28,10 @@ func TestLinkFlowThatNeedsToReplenishCredits(t *testing.T) {
 			},
 		})
 
-		err := l.IssueCredit(1)
+		err := l.DrainCredit(context.Background())
+		require.Error(t, err, "drain can only be used with receiver links using manual credit management")
+
+		err = l.IssueCredit(1)
 		require.Error(t, err, "issueCredit can only be used with receiver links using manual credit management")
 
 		// we've consumed half of the maximum credit we're allowed to have - reflow!
@@ -122,6 +125,62 @@ func TestLinkFlowWithManualCreditor(t *testing.T) {
 	default:
 		require.Fail(t, fmt.Sprintf("Unexpected frame was transferred: %+v", txFrame))
 	}
+}
+
+func TestLinkFlowWithDrain(t *testing.T) {
+	var drainedFlow *frames.PerformFlow
+	var issuedFlow *frames.PerformFlow
+
+	var netConn *fake.NetConn
+
+	fh := receiverFrameHandler(1010, ReceiverSettleModeSecond)
+	responder := func(remoteChannel uint16, req frames.FrameBody) (fake.Response, error) {
+		if body, ok := req.(*frames.PerformFlow); ok {
+			if body.Drain {
+				drainedFlow = body
+
+				encodedBody, err := fake.EncodeFrame(frames.TypeAMQP, 1010, body)
+
+				if err != nil {
+					return fake.Response{}, err
+				}
+
+				// indicate we're done too.
+				netConn.SendFrame(encodedBody)
+			} else {
+				issuedFlow = body
+			}
+		}
+
+		return fh(remoteChannel, req)
+	}
+
+	netConn = fake.NewNetConn(responder, fake.NetConnOptions{})
+
+	conn, err := NewConn(context.Background(), netConn, nil)
+	require.NoError(t, err)
+
+	session, err := conn.NewSession(context.Background(), nil)
+	require.NoError(t, err)
+
+	receiver, err := session.NewReceiver(context.Background(), "source", &ReceiverOptions{
+		Credit:         -1,
+		SettlementMode: ReceiverSettleModeSecond.Ptr(),
+	})
+	require.NoError(t, err)
+
+	err = receiver.IssueCredit(uint32(100))
+	require.NoError(t, err)
+
+	time.Sleep(200 * time.Millisecond)
+	err = receiver.DrainCredit(context.Background())
+	require.NoError(t, err)
+
+	require.NotNil(t, drainedFlow)
+	require.NotNil(t, issuedFlow)
+
+	require.NoError(t, conn.Close())
+	require.Zero(t, receiver.l.linkCredit)
 }
 
 func TestLinkFlowWithManualCreditorAndNoFlowNeeded(t *testing.T) {
