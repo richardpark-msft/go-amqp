@@ -1304,6 +1304,114 @@ func TestSenderNullValue(t *testing.T) {
 	checkLeaks()
 }
 
+func TestInvalidUTF8String(t *testing.T) {
+	if localBrokerAddr == "" {
+		t.Skip()
+	}
+
+	queue := fmt.Sprintf("TestInvalidUTF8String-%d", rand.Int63())
+
+	conn, err := amqp.Dial(context.Background(), localBrokerAddr, nil)
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		err := conn.Close()
+
+		// this UTF-8 error sneaks into everything.
+		var connErr *amqp.ConnError
+		require.ErrorAs(t, err, &connErr)
+		require.EqualError(t, connErr, "not a valid UTF-8 string")
+	})
+
+	session, err := conn.NewSession(context.Background(), nil)
+	require.NoError(t, err)
+
+	receiver, err := session.NewReceiver(context.Background(), queue, &amqp.ReceiverOptions{
+		Credit:         -1,
+		SettlementMode: amqp.ReceiverSettleModeSecond.Ptr(),
+		//RequestedSenderSettleMode: amqp.SenderSettleModeUnsettled.Ptr(),
+	})
+	require.NoError(t, err)
+
+	defer func() {
+		err := receiver.Close(context.Background())
+
+		var connErr *amqp.ConnError
+		require.ErrorAs(t, err, &connErr)
+		require.EqualError(t, connErr, "not a valid UTF-8 string")
+	}()
+
+	var invalidUTF8String = string([]byte{0xe2, 0x28, 0xa1})
+
+	sendMessage := func(t *testing.T) {
+		sender, err := session.NewSender(context.Background(), queue, nil)
+		require.NoError(t, err)
+
+		defer func() {
+			err = sender.Close(context.Background())
+			require.NoError(t, err)
+		}()
+
+		err = sender.Send(context.Background(), &amqp.Message{
+			Value: invalidUTF8String,
+		}, nil)
+
+		//var connErr *amqp.ConnError
+		//require.ErrorAs(t, err, &connErr)
+
+		// It's an `errorString{}``
+		require.EqualError(t, err, "not a valid UTF-8 string")
+
+		// sender is still alive!
+		err = sender.Send(context.Background(), &amqp.Message{
+			Value: "valid string to demonstrate the link is still alive",
+		}, nil)
+		require.NoError(t, err)
+
+		err = sender.Close(context.Background())
+		require.NoError(t, err)
+	}
+
+	// we'll send one message right now
+	t.Run("sender", sendMessage)
+
+	t.Run("receiver", func(t *testing.T) {
+		sendMessage(t)
+
+		err = receiver.IssueCredit(1)
+		require.NoError(t, err)
+
+		message, err := receiver.Receive(context.Background(), nil)
+		require.NoError(t, err)
+
+		err = receiver.RejectMessage(context.Background(), message, &amqp.Error{
+			Condition: amqp.ErrCondDetachForced,
+			Info: map[string]any{
+				"DeadLetterReason":           invalidUTF8String,
+				"DeadLetterErrorDescription": invalidUTF8String,
+			},
+		})
+
+		var connErr *amqp.ConnError
+		require.ErrorAs(t, err, &connErr)
+		require.EqualError(t, connErr, "not a valid UTF-8 string")
+
+		err = receiver.RejectMessage(context.Background(), message, &amqp.Error{
+			Condition: amqp.ErrCondDetachForced,
+			Info: map[string]any{
+				"DeadLetterReason":           "valid UTF8",
+				"DeadLetterErrorDescription": "valid UTF8",
+			},
+		})
+
+		// we're still dead here, so the receiver is dead. Different than the sender's behavior, which
+		// just returns the error verbatim (ie: as an errorString{})
+		connErr = nil
+		require.ErrorAs(t, err, &connErr)
+		require.EqualError(t, connErr, "not a valid UTF-8 string")
+	})
+}
+
 func repeatStrings(count int, strs ...string) []string {
 	var out []string
 	for i := 0; i < count; i += len(strs) {
