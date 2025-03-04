@@ -353,6 +353,7 @@ func WriteDescriptor(wr *buffer.Buffer, code AMQPType) {
 
 func writeString(wr *buffer.Buffer, str string) error {
 	if !utf8.ValidString(str) {
+		// TODO: this is where the encoding error is coming from.
 		return errors.New("not a valid UTF-8 string")
 	}
 	l := len(str)

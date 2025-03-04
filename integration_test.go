@@ -1329,7 +1329,6 @@ func TestInvalidUTF8String(t *testing.T) {
 	receiver, err := session.NewReceiver(context.Background(), queue, &amqp.ReceiverOptions{
 		Credit:         -1,
 		SettlementMode: amqp.ReceiverSettleModeSecond.Ptr(),
-		//RequestedSenderSettleMode: amqp.SenderSettleModeUnsettled.Ptr(),
 	})
 	require.NoError(t, err)
 
